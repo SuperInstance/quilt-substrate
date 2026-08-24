@@ -107,16 +107,23 @@ class DecayState:
 
 @dataclass
 class WitnessEntry:
-    """One entry in a cell's witness log."""
+    """One entry in a cell's witness log.
+
+    Fable 11 (Paper and the Tablet): a witness records not just what happened
+    but why. The justification field is the agent's reasoning, free-form text
+    that explains the action.
+    """
     ts: float
     agent_id: str
     action: str  # "read" | "write" | "inference" | "decay"
     value_hash: str
     prev_hash: str  # Merkle-link to previous entry
+    justification: str = ""  # Fable 11: why this action (free-form text)
 
     def to_dict(self) -> dict:
         return {"ts": self.ts, "agent_id": self.agent_id, "action": self.action,
-                "value_hash": self.value_hash, "prev_hash": self.prev_hash}
+                "value_hash": self.value_hash, "prev_hash": self.prev_hash,
+                "justification": self.justification}
 
 
 # -- Cell -----------------------------------------------------------------
@@ -351,6 +358,70 @@ class Cell:
         # Default: highest weight
         return max(self._convoy, key=lambda e: e.weight).value
 
+    def _geometric_median_1d(self, numeric):
+        """1D geometric median = the median.
+
+        For a weighted set of values, the weighted median is the value
+        where 50% of weight is below and 50% is above. This is the
+        geometric median for 1D data.
+        """
+        if not numeric:
+            return self._value
+        # Already implemented as weighted_median; this is the alias
+        return self.convoy_value(method="weighted_median")
+
+    def geometric_median(self, max_iter=100, tol=1e-6):
+        """The geometric median of the convoy (multi-dimensional).
+
+        Uses Weiszfeld's algorithm. Robust to outliers.
+
+        For 1D values, this is the same as weighted_median.
+        For multi-dimensional tensor values, this converges to the
+        point that minimizes sum(w_i * ||x - v_i||).
+
+        Returns self._value if the convoy has no numeric values, or if
+        the values are 1D (use weighted_median instead).
+        """
+        # Get values
+        numeric = [(e.weight, e.value) for e in self._convoy
+                   if isinstance(e.value, (int, float))]
+        if not numeric:
+            return self._value
+        # 1D case
+        if all(isinstance(v, (int, float)) for _, v in numeric):
+            return self._geometric_median_1d(numeric)
+        # Multi-dimensional case
+        try:
+            import numpy as np
+        except ImportError:
+            # No numpy, fall back to weighted mean
+            return self.convoy_value(method="weighted_mean")
+        # All values must be lists of the same length
+        dim = len(numeric[0][1])
+        if not all(len(v) == dim for _, v in numeric):
+            return self._value
+        # Weiszfeld's algorithm
+        weights = np.array([w for w, _ in numeric])
+        values = np.array([v for _, v in numeric])
+        # Normalize weights
+        weights = weights / weights.sum()
+        # Start with weighted mean
+        x = np.average(values, axis=0, weights=weights)
+        for _ in range(max_iter):
+            # Compute distances
+            distances = np.linalg.norm(values - x, axis=1)
+            # Avoid division by zero
+            distances = np.where(distances < tol, tol, distances)
+            # Weiszfeld update
+            numer = np.sum(weights[:, None] * values / distances[:, None], axis=0)
+            denom = np.sum(weights / distances)
+            x_new = numer / denom
+            if np.linalg.norm(x_new - x) < tol:
+                x = x_new
+                break
+            x = x_new
+        return x.tolist()
+
     # -- Decay (paper 109) --
 
     @property
@@ -367,14 +438,23 @@ class Cell:
 
     # -- Witness (paper 110) --
 
-    def witness(self, agent_id: str, action: str, value: Any) -> WitnessEntry:
-        """Append a witness entry. Returns the entry."""
+    def witness(self, agent_id: str, action: str, value: Any, justification: str = "") -> WitnessEntry:
+        """Append a witness entry. Returns the entry.
+
+        Args:
+            agent_id: The agent performing the action
+            action: "read" | "write" | "inference" | "decay"
+            value: The value being witnessed
+            justification: Fable 11 — why this action. Free-form text that
+                explains the agent's reasoning. Optional but encouraged.
+        """
         entry = WitnessEntry(
             ts=_now_ts(),
             agent_id=agent_id,
             action=action,
             value_hash=_hash(value),
             prev_hash=self._witness_root,
+            justification=justification,
         )
         self._witness_log.append(entry)
         self._witness_root = _hash(entry.to_dict())
@@ -579,17 +659,18 @@ class Substrate:
             for c in self._cells.values():
                 c.tick()
 
-    def witness(self, cell: Cell, agent_id: str, action: str, value: Any = None) -> None:
+    def witness(self, cell: Cell, agent_id: str, action: str, value: Any = None, justification: str = "") -> None:
         """Witness a read/write/inference/decay on a cell.
 
         Records the action in:
         - the cell's witness log (per-cell, paper 110)
         - the agent's witness log (per-agent, paper 117 Open Q3)
         - the cell's convoy (for consensus, paper 108 + paper 117 Open Q1)
+        - the justification (Fable 11: why this action)
         """
         if value is None:
             value = cell.value
-        cell.witness(agent_id, action, value)
+        cell.witness(agent_id, action, value, justification=justification)
         # Per-agent witness log (Open Q3)
         if agent_id not in self._agent_witness:
             self._agent_witness[agent_id] = []

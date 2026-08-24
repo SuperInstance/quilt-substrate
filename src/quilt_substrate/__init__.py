@@ -15,12 +15,16 @@ from .openers import (
     Opener, ChartOpener, VoiceOpener, GestureOpener, WitnessOpener,
     register, get, all_openers,
 )
+from .jepa import (
+    LinearJEPA, MLPJEPA, KnnJEPA, auto_train_jepa,
+)
 
 __all__ = [
     "Cell", "Substrate", "ConvoyEntry", "DecayState", "WitnessEntry", "Vibe",
     "Opener", "ChartOpener", "VoiceOpener", "GestureOpener", "WitnessOpener",
     "register", "get", "all_openers",
+    "LinearJEPA", "MLPJEPA", "KnnJEPA", "auto_train_jepa",
     "_hash", "_now", "_now_ts",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
