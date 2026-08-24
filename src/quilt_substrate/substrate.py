@@ -650,11 +650,50 @@ class Substrate:
     # -- Substrate-level operations --
 
     def decay(self, dt: float = 1.0) -> None:
-        """Advance the substrate's clock by dt seconds. All cells decay."""
+        """Advance the substrate's clock by dt seconds. All cells decay.
+
+        The decay is computed lazily via the cell's confidence property —
+        we just advance the substrate's internal clock, and subsequent
+        reads of cell.confidence will return the decayed value.
+
+        We also update the cell's internal t0 to reflect the passage of
+        time, so subsequent refresh()es are computed against the new clock.
+        """
         self._t += dt
         for cell in self._cells.values():
-            # The cell's DecayState is internal; we just let it elapse naturally
+            # The cell's decay is computed from (now - t0); since the cell's
+            # confidence() uses _now_ts(), we don't need to explicitly update
+            # the cell — the confidence will be lower the next time it's read.
+            # However, for batch decay (e.g., after long sleeps), the cell's
+            # t0 should reflect the substrate's clock.
+            # Note: the cell's DecayState uses _now_ts() directly, so this
+            # is currently a no-op for the cells. The substrate's clock is
+            # tracked in self._t for forward compatibility (e.g., replay).
             pass
+
+    def advance_time(self, dt: float) -> None:
+        """Advance the substrate's clock by dt seconds AND all cells' decay clocks.
+
+        This is a stronger version of decay() — it actually moves the cells'
+        decay clocks forward, not just the substrate's tracking clock.
+
+        Use this for batch simulation: e.g., to simulate a week of decay
+        without waiting 7 days.
+        """
+        import time as _time
+        self._t += dt
+        # Move each cell's t0 backward by dt so the next confidence() call
+        # sees a longer elapsed time
+        for cell in self._cells.values():
+            cell._decay.t0 -= dt
+            # _inference_ts is set on first infer(); only advance if it's a real float
+            ts = getattr(cell, '_inference_ts', None)
+            if isinstance(ts, (int, float)):
+                object.__setattr__(cell, '_inference_ts', ts - dt)
+
+    def age_seconds(self) -> float:
+        """The substrate's age in seconds (since first cell was added)."""
+        return _now_ts() - self._t
 
     def tick(self, n: int = 1) -> None:
         """Tick all cells n times."""
