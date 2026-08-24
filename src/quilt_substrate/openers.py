@@ -182,3 +182,142 @@ def _register_defaults():
 
 
 _register_defaults()
+
+
+
+class MIDIOpener(Opener):
+    """Renders cells as MIDI notes.
+
+    Each cell becomes a note on the MIDI channel. The cell's value
+    is the note's velocity, the address is the note's pitch (hashed).
+
+    Fable 10 (Conductor): the substrate as an orchestra, the wave primitive.
+    """
+
+    def activate(self, target) -> Iterator[Dict[str, Any]]:
+        from .substrate import Substrate
+        if isinstance(target, Substrate):
+            cells = target.all_cells()
+        else:
+            cells = [target]
+        for cell in cells:
+            # Map address to a MIDI note (0-127)
+            note = sum(ord(c) for c in cell.address) % 128
+            # Map value to velocity (0-127)
+            try:
+                velocity = max(0, min(127, int(float(cell.value) * 12)))
+            except (TypeError, ValueError):
+                velocity = 64  # default
+            yield {
+                "kind": "midi",
+                "note": note,
+                "velocity": velocity,
+                "channel": 0,
+                "duration_ms": 100,
+                "address": cell.address,
+            }
+
+
+class RESTOpener(Opener):
+    """Renders cells as REST resources.
+
+    Each cell becomes a REST endpoint. GET /cells/{address} returns the
+    cell's value, headers, and links to related cells. POST writes,
+    DELETE removes. Fable 11 (Paper and the Tablet): REST is the
+    silence that lets the system be honest.
+    """
+
+    def activate(self, target) -> Iterator[Dict[str, Any]]:
+        from .substrate import Substrate
+        if isinstance(target, Substrate):
+            cells = target.all_cells()
+        else:
+            cells = [target]
+        # Base path
+        base = "/api/v1"
+        for cell in cells:
+            yield {
+                "kind": "rest",
+                "method": "GET",
+                "path": f"{base}/cells/{cell.address}",
+                "returns": {
+                    "address": cell.address,
+                    "value": cell.value,
+                    "confidence": cell.confidence,
+                    "canonical": cell.canonical,
+                },
+            }
+            yield {
+                "kind": "rest",
+                "method": "POST",
+                "path": f"{base}/cells/{cell.address}/witness",
+                "body": {"agent": "<agent_id>", "action": "read|write|inference"},
+            }
+
+
+class MUDOpener(Opener):
+    """Renders the substrate as a Multi-User Dungeon (MUD) room.
+
+    Each cell is a room. Connections between cells are exits.
+    The MUD is a textual world where you can navigate by typing
+    compass directions.
+
+    Fable 21 (Compass and the Graph): the substrate is a graph you
+    can walk. The MUD makes the walk textual and explorable.
+    """
+
+    def activate(self, target) -> Iterator[Dict[str, Any]]:
+        from .substrate import Substrate
+        if not isinstance(target, Substrate):
+            yield {"kind": "mud_room", "address": target.address, "description": f"You are at {target.address}."}
+            return
+        cells = target.all_cells()
+        for cell in cells:
+            exits = []
+            for neighbor in cell.neighbors():
+                if neighbor.address in [c.address for c in cells]:
+                    exits.append(neighbor.address)
+            yield {
+                "kind": "mud_room",
+                "address": cell.address,
+                "description": f"You are at {cell.address}. Value: {cell.value}. Confidence: {cell.confidence:.2f}.",
+                "exits": exits,
+            }
+
+
+class PLATOOpener(Opener):
+    """Renders the substrate as a PLATO-style lesson.
+
+    Each cell is a lesson unit. The PLATO system (1970s) was the
+    first multi-user educational computer system. Its lessons were
+    cell-like: discrete units, with prerequisites and followups.
+
+    Fable 06 (Grandmother): the PLATO opener is for teaching.
+    """
+
+    def activate(self, target) -> Iterator[Dict[str, Any]]:
+        from .substrate import Substrate
+        if isinstance(target, Substrate):
+            cells = target.all_cells()
+        else:
+            cells = [target]
+        for cell in cells:
+            # The cell's value is the lesson content
+            yield {
+                "kind": "plato_lesson",
+                "address": cell.address,
+                "title": f"Lesson: {cell.address}",
+                "content": str(cell.value),
+                "prerequisites": [n.address for n in cell.neighbors()
+                                  if isinstance(n, type(cell))],
+                "next": [n.address for n in cell.neighbors()
+                         if isinstance(n, type(cell))],
+            }
+
+
+# Register the new openers
+# already imported above
+register("midi", MIDIOpener())
+register("rest", RESTOpener())
+register("mud", MUDOpener())
+register("plato", PLATOOpener())
