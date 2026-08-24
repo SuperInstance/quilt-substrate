@@ -468,6 +468,52 @@ class Cell:
     def witness_root(self) -> str:
         return self._witness_root
 
+    def temperature(self, window_seconds: float = 3600.0) -> float:
+        """Paper 124: The Substrate's Temperature.
+
+        T(C, tau) = -sum p_k * ln(p_k), where p_k is the empirical probability
+        of operation k in the witness log over the window tau.
+
+        Returns 0 for an empty witness log. Bounded above by ln(11) ~= 2.398
+        for the 11 known primitives.
+        """
+        import math
+        if not self._witness_log:
+            return 0.0
+        # Filter to entries within the window
+        now = _now_ts()
+        window_start = now - window_seconds
+        recent = [e for e in self._witness_log if e.ts >= window_start]
+        if not recent:
+            return 0.0
+        # Count operations
+        from collections import Counter
+        counts = Counter(e.action for e in recent)
+        n = len(recent)
+        T = 0.0
+        for k in counts:
+            p = counts[k] / n
+            T -= p * math.log(p)
+        return T
+
+    def regime(self) -> str:
+        """Classify the cell's regime based on temperature.
+
+        Paper 124, Definition 2.5:
+        - frozen: T = 0
+        - cold: 0 < T <= 0.5
+        - warm: 0.5 < T <= 1.5
+        - hot:  T > 1.5
+        """
+        T = self.temperature()
+        if T == 0.0:
+            return "frozen"
+        if T <= 0.5:
+            return "cold"
+        if T <= 1.5:
+            return "warm"
+        return "hot"
+
     # -- Schrödinger pattern (paper 107) --
 
     def infer(self, inferred_value: Any, confidence: float = 1.0) -> None:
@@ -694,6 +740,33 @@ class Substrate:
     def age_seconds(self) -> float:
         """The substrate's age in seconds (since first cell was added)."""
         return _now_ts() - self._t
+
+    def temperature(self, window_seconds: float = 3600.0) -> float:
+        """Paper 124, Definition 2.4: Substrate-wide temperature.
+
+        The witness-count-weighted average of cell temperatures.
+        """
+        cells = self.all_cells()
+        if not cells:
+            return 0.0
+        total_n = 0
+        weighted_T = 0.0
+        for c in cells:
+            log = c.witness_log
+            if not log:
+                continue
+            # Count entries in the window
+            now = _now_ts()
+            window_start = now - window_seconds
+            n = sum(1 for e in log if e.ts >= window_start)
+            if n == 0:
+                continue
+            T = c.temperature(window_seconds=window_seconds)
+            total_n += n
+            weighted_T += n * T
+        if total_n == 0:
+            return 0.0
+        return weighted_T / total_n
 
     def tick(self, n: int = 1) -> None:
         """Tick all cells n times."""

@@ -14,6 +14,7 @@ from .substrate import (
 from .openers import (
     Opener, ChartOpener, VoiceOpener, GestureOpener, WitnessOpener,
     MIDIOpener, RESTOpener, MUDOpener, PLATOOpener,
+    SlateOpener, HarborOpener, ReefOpener, DiveOpener, TideOpener,
     register, get, all_openers,
 )
 from .jepa import (
@@ -24,6 +25,7 @@ __all__ = [
     "Cell", "Substrate", "ConvoyEntry", "DecayState", "WitnessEntry", "Vibe",
     "Opener", "ChartOpener", "VoiceOpener", "GestureOpener", "WitnessOpener",
     "MIDIOpener", "RESTOpener", "MUDOpener", "PLATOOpener",
+    "SlateOpener", "HarborOpener", "ReefOpener", "DiveOpener", "TideOpener",
     "register", "get", "all_openers",
     "LinearJEPA", "MLPJEPA", "KnnJEPA", "auto_train_jepa",
     "_hash", "_now", "_now_ts",
