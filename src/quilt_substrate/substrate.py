@@ -630,6 +630,9 @@ class Substrate:
         # Per-agent witness log (paper 117, Open Q3)
         # agent_id -> List[Dict] of (cell_address, ts, action, value)
         self._agent_witness: Dict[str, List[Dict[str, Any]]] = {}
+        # Per-agent decay rates (paper 117, Open Q8)
+        # agent_id -> lambda (default 0.0001/s, ~3 hours half-life)
+        self._agent_decay: Dict[str, float] = {}
 
     def add(self, cell: Cell) -> "Substrate":
         self._cells[cell.address] = cell
@@ -683,6 +686,9 @@ class Substrate:
         # Update convoy with the value for consensus (Open Q1)
         if action == "write":
             cell._add_to_convoy(agent_id, weight=1.0, value=value)
+            # Apply the agent's decay rate (Open Q8)
+            if agent_id in self._agent_decay:
+                cell.decay.lam = self._agent_decay[agent_id]
 
     def observe(self, address: str, agent_id: str = "default") -> Any:
         """Observe a cell: marks it canonical and witnesses the read."""
@@ -707,6 +713,27 @@ class Substrate:
         if cell is not None:
             cell.refresh()
             self.witness(cell, "system", "refresh", cell.value)
+
+    # -- Per-agent decay rates (paper 117, Open Q8) --
+
+    def set_agent_decay(self, agent_id: str, lam: float) -> None:
+        """Set the decay rate for an agent's writes.
+
+        Different agents have different freshness requirements:
+        - Chat messages: high decay (0.1/s, seconds)
+        - Sensor readings: medium decay (0.001/s, minutes)
+        - Chart data: low decay (1e-6/s, days)
+        - Geological data: very low (1e-9/s, centuries)
+
+        When this agent writes, the cell's decay rate is set to this value.
+        """
+        if lam < 0:
+            raise ValueError(f"Decay rate must be non-negative, got {lam}")
+        self._agent_decay[agent_id] = lam
+
+    def get_agent_decay(self, agent_id: str) -> float:
+        """Get the decay rate for an agent. Returns 1e-4 if not set."""
+        return self._agent_decay.get(agent_id, 1e-4)
 
     # -- Per-agent witness log (paper 117, Open Q3) --
 
