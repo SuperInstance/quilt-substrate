@@ -47,8 +47,11 @@ def test_double_entry():
 def test_vibe_step():
     v = Vibe(pos=(0.0,), vel=(1.0,), acc=(0.5,))
     v2 = v.step(dt=2.0)
+    # Math (paper 117, §2.5):
+    # p_{t+1} = p_t + v_t dt + 0.5 a_t dt^2 = 0 + 1*2 + 0.5*0.5*4 = 3.0
+    # v_{t+1} = (v_t + a_t dt) * (1 - damping) = (1 + 0.5*2) * (1 - 0.1) = 2.0 * 0.9 = 1.8
     assert v2.pos[0] == 3.0
-    assert v2.vel[0] == 2.0
+    assert v2.vel[0] == 1.8  # damped (was 2.0 before damping was added)
 
 
 def test_gc_phases():

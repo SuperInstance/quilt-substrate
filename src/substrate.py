@@ -37,21 +37,32 @@ def _now_ts() -> float:
 
 @dataclass(frozen=True)
 class Vibe:
-    """Position, velocity, acceleration through the graph."""
+    """Position, velocity, acceleration through the graph.
+
+    The Vibe is a damped harmonic oscillator. The spring constant k connects
+    the position to a target; the damping coefficient c reduces the velocity
+    at each step. With c=0.1, the system is critically damped for small dt.
+
+    Math (paper 117, §2.5):
+        p_{t+1} = p_t + v_t dt + 0.5 a_t dt^2
+        v_{t+1} = (v_t + a_t dt) * (1 - c)
+        a_{t+1} = k * (target - p_{t+1})
+    """
     pos: Tuple[float, ...] = (0.0,)
     vel: Tuple[float, ...] = (0.0,)
     acc: Tuple[float, ...] = (0.0,)
+    damping: float = 0.1  # damping coefficient (paper 117, §2.5)
 
     def step(self, dt: float = 1.0) -> "Vibe":
         new_pos = tuple(p + v * dt + 0.5 * a * dt * dt for p, v, a in zip(self.pos, self.vel, self.acc))
-        new_vel = tuple(v + a * dt for v, a in zip(self.vel, self.acc))
-        return Vibe(pos=new_pos, vel=new_vel, acc=self.acc)
+        new_vel = tuple((v + a * dt) * (1.0 - self.damping) for v, a in zip(self.vel, self.acc))
+        return Vibe(pos=new_pos, vel=new_vel, acc=self.acc, damping=self.damping)
 
     def nudge(self, target_pos: Tuple[float, ...], k: float = 0.1) -> "Vibe":
         if len(target_pos) != len(self.pos):
             target_pos = target_pos + self.pos[len(target_pos):]
         new_acc = tuple(k * (t - p) for p, t in zip(self.pos, target_pos))
-        return Vibe(pos=self.pos, vel=self.vel, acc=new_acc)
+        return Vibe(pos=self.pos, vel=self.vel, acc=new_acc, damping=self.damping)
 
 
 # -- Convoy primitive (paper 108) -----------------------------------------
