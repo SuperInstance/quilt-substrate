@@ -160,6 +160,8 @@ class Cell:
         # Schrödinger pattern (paper 107)
         self._canonical: bool = False
         self._inference: Optional[Any] = None
+        self._inference_confidence: float = 0.0  # Fable 19: oracle's confidence
+        self._inference_ts: float = field(default_factory=_now_ts)  # Fable 22+19: inference decays
         # GC tracking
         self._log: List[Dict[str, Any]] = []
 
@@ -267,6 +269,11 @@ class Cell:
         """
         # Remove existing entry for this agent
         self._convoy = [e for e in self._convoy if e.agent_id != agent_id]
+        # Weights can be any non-negative float. The convoy code handles
+        # weights > 1.0 (they just contribute more to weighted consensus).
+        # Negative weights are clamped to 0.
+        if weight < 0:
+            weight = 0.0
         self._convoy.append(ConvoyEntry(
             agent_id=agent_id,
             weight=weight,
@@ -289,7 +296,12 @@ class Cell:
         - "highest_weight" — the value with the highest single weight (the original behavior).
 
         Falls back to self._value if values aren't numeric.
+
+        Raises ValueError for unknown methods.
         """
+        valid_methods = ("weighted_mean", "weighted_median", "trimmed_mean", "highest_weight")
+        if method not in valid_methods:
+            raise ValueError(f"Unknown consensus method: {method}. Valid: {valid_methods}")
         if not self._convoy:
             return self._value
         # Only consider numeric values
@@ -378,9 +390,18 @@ class Cell:
 
     # -- Schrödinger pattern (paper 107) --
 
-    def infer(self, inferred_value: Any) -> None:
-        """Set the inferred value (Schrödinger pattern: pre-rendered, not canonical)."""
+    def infer(self, inferred_value: Any, confidence: float = 1.0) -> None:
+        """Set the inferred value (Schrödinger pattern: pre-rendered, not canonical).
+
+        Args:
+            inferred_value: The inferred (pre-rendered) value
+            confidence: The inference confidence in [0, 1]. Defaults to 1.0
+                (full confidence). The inference confidence decays over time
+                (Fable 19 + Fable 22: oracle's confidence meets the sundial).
+        """
         self._inference = inferred_value
+        self._inference_confidence = max(0.0, min(1.0, confidence))
+        self._inference_ts = _now_ts()
         self._canonical = False
 
     def observe_canonical(self) -> Any:
@@ -395,6 +416,34 @@ class Cell:
     @property
     def inference(self) -> Any:
         return self._inference
+
+    @property
+    def inference_confidence(self, t: Optional[float] = None) -> float:
+        """The inference's confidence, decayed by time.
+
+        Fable 19 + 22: An oracle's confidence in her prophecy is high when
+        the prophecy is fresh, and decays as the prophecy ages. This method
+        returns the current decayed confidence.
+
+        Decay rate: matches the cell's decay rate (lam).
+        """
+        if t is None:
+            t = _now_ts()
+        elapsed = max(0.0, t - self._inference_ts)
+        # Use a faster decay for inferences (5x faster than canonical values)
+        return self._inference_confidence * math.exp(-5 * self._decay.lam * elapsed)
+
+    def confident_inference(self, threshold: float = 0.5) -> Optional[Any]:
+        """Return the inference only if its (decayed) confidence is above threshold.
+
+        Fable 19: The oracle must distinguish prophecy from noise. The
+        substrate should refuse to act on inferences that are too uncertain.
+
+        Returns None if confidence is below threshold.
+        """
+        if self.inference_confidence >= threshold:
+            return self._inference
+        return None
 
     # -- Tensor encoding (paper 112) --
 
@@ -764,22 +813,25 @@ class Substrate:
         1. Collecting all (cell_address, witness_root) pairs
         2. Hashing each pair to get the leaves
         3. Pairwise combining until one root remains
+
+        Leaves are sorted by (address, witness_root) to ensure deterministic
+        ordering even if two addresses produce the same hash.
         """
         if not self._cells:
             return "0" * 16
-        # Step 1: collect leaves
+        # Step 1: collect leaves, sorted by (address, witness_root) for determinism
         leaves = sorted(
-            (_hash(f"{addr}:{c.witness_root}") for addr, c in self._cells.items())
+            (_hash(f"{addr}:{c.witness_root}"), addr) for addr, c in self._cells.items()
         )
         # Step 2-3: pairwise hash until one root
         while len(leaves) > 1:
             new_level = []
             for i in range(0, len(leaves) - 1, 2):
-                new_level.append(_hash(leaves[i] + leaves[i + 1]))
+                new_level.append((_hash(leaves[i][0] + leaves[i + 1][0]), leaves[i][1]))
             if len(leaves) % 2 == 1:
                 new_level.append(leaves[-1])  # odd one out
             leaves = new_level
-        return leaves[0]
+        return leaves[0][0]
 
     def merkle_proof(self, address: str) -> Optional[List[Tuple[str, str]]]:
         """Return a Merkle proof that `address`'s witness log is in the tree.
