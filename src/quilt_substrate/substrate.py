@@ -430,8 +430,10 @@ class Cell:
         if t is None:
             t = _now_ts()
         elapsed = max(0.0, t - self._inference_ts)
+        # Defensive: if decay.lam is None or invalid, no decay
+        lam = self._decay.lam if isinstance(self._decay.lam, (int, float)) else 0.0
         # Use a faster decay for inferences (5x faster than canonical values)
-        return self._inference_confidence * math.exp(-5 * self._decay.lam * elapsed)
+        return self._inference_confidence * math.exp(-5 * lam * elapsed)
 
     def confident_inference(self, threshold: float = 0.5) -> Optional[Any]:
         """Return the inference only if its (decayed) confidence is above threshold.

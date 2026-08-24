@@ -9,7 +9,7 @@ the substrate is the implementation.
 """
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from substrate import Cell, Substrate
+from quilt_substrate.substrate import Cell, Substrate
 
 
 # --- Fable 11: The Paper and the Tablet ---

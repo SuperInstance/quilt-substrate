@@ -1,7 +1,7 @@
 """Tests for the Schrödinger pattern and the substrate-level operations (paper 107)."""
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from substrate import Cell, Substrate
+from quilt_substrate.substrate import Cell, Substrate
 
 
 def test_cell_initially_not_canonical():

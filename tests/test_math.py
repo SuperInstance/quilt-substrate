@@ -13,7 +13,7 @@ The 5 proved theorems:
 """
 import sys, os, time, math
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from substrate import Cell, Substrate, _hash
+from quilt_substrate.substrate import Cell, Substrate, _hash
 
 
 # -- Theorem 1: Witness Integrity ------------------------------------------

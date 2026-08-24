@@ -9,7 +9,7 @@ These tests validate the 5 open questions we resolved:
 """
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from substrate import Substrate, Cell, _hash
+from quilt_substrate.substrate import Substrate, Cell, _hash
 
 
 # -- Open Q1: Convoy weighted-mean consensus ------------------------------

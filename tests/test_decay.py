@@ -1,7 +1,7 @@
 """Tests for the Decay primitive (paper 109)."""
 import sys, os, time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from substrate import Cell, Substrate
+from quilt_substrate.substrate import Cell, Substrate
 
 
 def test_initial_confidence_is_one():

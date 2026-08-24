@@ -7,7 +7,7 @@ Fable 21 (Compass and the Graph) — the substrate knows its own topology.
 """
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from substrate import Substrate, Cell
+from quilt_substrate.substrate import Substrate, Cell
 
 
 def test_betti_0_empty():

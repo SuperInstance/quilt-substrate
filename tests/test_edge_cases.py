@@ -12,7 +12,7 @@ These tests validate that the substrate handles:
 """
 import sys, os, math
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from substrate import Substrate, Cell
+from quilt_substrate.substrate import Substrate, Cell
 
 
 def test_empty_substrate():
