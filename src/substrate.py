@@ -69,11 +69,16 @@ class Vibe:
 
 @dataclass
 class ConvoyEntry:
-    """One agent's contribution to a cell's convoy."""
+    """One agent's contribution to a cell's convoy.
+
+    The convoy tracks who wrote what. For consensus (Open Q1), we need the
+    value too. We store the *last value* the agent wrote.
+    """
     agent_id: str
     weight: float  # 0.0 to 1.0
     last_write: float  # timestamp
     value_hash: str  # hash of the value the agent wrote
+    value: Any = None  # the actual value the agent wrote (for consensus)
 
 
 # -- Decay primitive (paper 109) ------------------------------------------
@@ -254,8 +259,12 @@ class Cell:
 
     # -- Convoy (paper 108) --
 
-    def _add_to_convoy(self, agent_id: str, weight: float = 1.0) -> None:
-        """Add an agent to this cell's convoy."""
+    def _add_to_convoy(self, agent_id: str, weight: float = 1.0, value: Any = None) -> None:
+        """Add an agent to this cell's convoy.
+
+        If `value` is provided, the agent's last-written value is recorded
+        for consensus. If not, the cell's current value is used.
+        """
         # Remove existing entry for this agent
         self._convoy = [e for e in self._convoy if e.agent_id != agent_id]
         self._convoy.append(ConvoyEntry(
@@ -263,21 +272,72 @@ class Cell:
             weight=weight,
             last_write=_now_ts(),
             value_hash=_hash(self._value),
+            value=value if value is not None else self._value,
         ))
 
     @property
     def convoy(self) -> List[ConvoyEntry]:
         return list(self._convoy)
 
-    def convoy_value(self) -> Any:
-        """The weighted-median consensus value across the convoy.
-        Falls back to the most recent write if values aren't numeric."""
+    def convoy_value(self, method: str = "weighted_mean") -> Any:
+        """The consensus value across the convoy.
+
+        Methods (paper 108 + paper 117, Open Q1):
+        - "weighted_mean" — sum(w_i * v_i) / sum(w_i). Fast, but vulnerable to outliers.
+        - "weighted_median" — the value where 50% of weight is below. Robust to outliers.
+        - "trimmed_mean" — drop the highest and lowest 10% of weight, then mean.
+        - "highest_weight" — the value with the highest single weight (the original behavior).
+
+        Falls back to self._value if values aren't numeric.
+        """
         if not self._convoy:
             return self._value
-        # For now, return the value with the highest weight * recency
-        now = _now_ts()
-        best = max(self._convoy, key=lambda e: e.weight * (1.0 / (1.0 + now - e.last_write)))
-        return self._value  # The convoy consensus is a future enhancement
+        # Only consider numeric values
+        numeric = [(e.weight, e.value) for e in self._convoy
+                   if isinstance(e.value, (int, float))]
+        if not numeric:
+            # Fallback: most-recent highest-weight
+            now = _now_ts()
+            best = max(self._convoy, key=lambda e: e.weight * (1.0 / (1.0 + now - e.last_write)))
+            return self._value
+
+        if method == "weighted_mean":
+            total_w = sum(w for w, _ in numeric)
+            if total_w == 0:
+                return self._value
+            return sum(w * v for w, v in numeric) / total_w
+
+        if method == "weighted_median":
+            # Sort by value
+            numeric.sort(key=lambda x: x[1])
+            total_w = sum(w for w, _ in numeric)
+            cum_w = 0
+            for w, v in numeric:
+                cum_w += w
+                if cum_w >= total_w / 2:
+                    return v
+            return numeric[-1][1]
+
+        if method == "trimmed_mean":
+            # Drop top and bottom 10% by weight
+            numeric.sort(key=lambda x: x[1])
+            total_w = sum(w for w, _ in numeric)
+            trim = total_w * 0.1
+            cum_w = 0
+            kept = []
+            for w, v in numeric:
+                cum_w += w
+                if trim <= cum_w <= total_w - trim:
+                    kept.append((w, v))
+            if not kept:
+                return self._value
+            kept_w = sum(w for w, _ in kept)
+            if kept_w == 0:
+                return self._value
+            return sum(w * v for w, v in kept) / kept_w
+
+        # Default: highest weight
+        return max(self._convoy, key=lambda e: e.weight).value
 
     # -- Decay (paper 109) --
 
@@ -436,6 +496,9 @@ class Substrate:
     def __init__(self):
         self._cells: Dict[str, Cell] = {}
         self._t: float = _now_ts()
+        # Per-agent witness log (paper 117, Open Q3)
+        # agent_id -> List[Dict] of (cell_address, ts, action, value)
+        self._agent_witness: Dict[str, List[Dict[str, Any]]] = {}
 
     def add(self, cell: Cell) -> "Substrate":
         self._cells[cell.address] = cell
@@ -466,10 +529,28 @@ class Substrate:
                 c.tick()
 
     def witness(self, cell: Cell, agent_id: str, action: str, value: Any = None) -> None:
-        """Witness a read/write/inference/decay on a cell."""
+        """Witness a read/write/inference/decay on a cell.
+
+        Records the action in:
+        - the cell's witness log (per-cell, paper 110)
+        - the agent's witness log (per-agent, paper 117 Open Q3)
+        - the cell's convoy (for consensus, paper 108 + paper 117 Open Q1)
+        """
         if value is None:
             value = cell.value
         cell.witness(agent_id, action, value)
+        # Per-agent witness log (Open Q3)
+        if agent_id not in self._agent_witness:
+            self._agent_witness[agent_id] = []
+        self._agent_witness[agent_id].append({
+            "cell_address": cell.address,
+            "ts": _now_ts(),
+            "action": action,
+            "value": value,
+        })
+        # Update convoy with the value for consensus (Open Q1)
+        if action == "write":
+            cell._add_to_convoy(agent_id, weight=1.0, value=value)
 
     def observe(self, address: str, agent_id: str = "default") -> Any:
         """Observe a cell: marks it canonical and witnesses the read."""
@@ -495,10 +576,32 @@ class Substrate:
             cell.refresh()
             self.witness(cell, "system", "refresh", cell.value)
 
+    # -- Per-agent witness log (paper 117, Open Q3) --
+
+    def agent_witness(self, agent_id: str) -> List[Dict[str, Any]]:
+        """Return the witness log for a specific agent.
+
+        The per-agent log is queryable independently of the per-cell log.
+        Use this to answer: "what did this agent read, write, and infer?"
+        """
+        return list(self._agent_witness.get(agent_id, []))
+
+    def all_agents(self) -> List[str]:
+        """Return all agents that have witnessed anything."""
+        return list(self._agent_witness.keys())
+
     # -- Opener layer (paper 111) --
 
     def render(self, opener: str, **kwargs) -> Any:
-        """Render the substrate through an opener."""
+        """Render the substrate through an opener.
+
+        Available openers (paper 117, Open Q6):
+        - chart, list, tensor, witness, convoy, graph (the 6 originals)
+        - voice — text representation suitable for TTS (e.g., for a blind agent)
+        - telnet — text representation suitable for a CLI (e.g., for ssh access)
+        - gesture — JSON description suitable for touch input
+        - flowchart — DOT graph description suitable for Graphviz
+        """
         if opener == "chart":
             return self._render_chart(**kwargs)
         elif opener == "list":
@@ -511,6 +614,14 @@ class Substrate:
             return self._render_convoy(**kwargs)
         elif opener == "graph":
             return self._render_graph(**kwargs)
+        elif opener == "voice":
+            return self._render_voice(**kwargs)
+        elif opener == "telnet":
+            return self._render_telnet(**kwargs)
+        elif opener == "gesture":
+            return self._render_gesture(**kwargs)
+        elif opener == "flowchart":
+            return self._render_flowchart(**kwargs)
         else:
             return {"error": f"unknown opener: {opener}"}
 
@@ -561,12 +672,161 @@ class Substrate:
                 edges.append({"from": other.address, "to": c.address, "weight": k})
         return {"nodes": nodes, "edges": edges}
 
+    def _render_voice(self, **kwargs) -> str:
+        """Render the substrate as text suitable for text-to-speech.
+
+        Each cell is announced with its address, value, and confidence.
+        The result is a plain-text narrative that a blind agent (or a human
+        with a screen reader) can listen to.
+
+        Format: "Cell <address>: <value>. Confidence <conf>."
+        """
+        parts = []
+        for c in sorted(self._cells.values(), key=lambda c: c.address):
+            val = c.value
+            if isinstance(val, float):
+                val = f"{val:.3f}"
+            conf = f"{c.confidence:.2f}"
+            fresh = "fresh" if c.confidence > 0.7 else "stale"
+            parts.append(f"Cell {c.address}: {val}. Confidence {conf}, {fresh}.")
+        if not parts:
+            return "Empty substrate."
+        return " ".join(parts)
+
+    def _render_telnet(self, **kwargs) -> str:
+        """Render the substrate as a CLI-friendly text dump.
+
+        Format: lines like "addr\tvalue\tconf\twitness_count\tconvoy_size"
+        Suitable for `ssh substrate@host cat /var/substrate/telnet.txt`.
+        """
+        lines = ["# substrate telnet view", f"# cells: {len(self._cells)}", ""]
+        lines.append("address\tvalue\tconf\twitness_count\tconvoy_size")
+        for c in sorted(self._cells.values(), key=lambda c: c.address):
+            val = c.value
+            if isinstance(val, float):
+                val = f"{val:.3f}"
+            lines.append(f"{c.address}\t{val}\t{c.confidence:.3f}\t{len(c.witness_log)}\t{len(c.convoy)}")
+        return "\n".join(lines)
+
+    def _render_gesture(self, **kwargs) -> Dict:
+        """Render the substrate as a JSON description for touch input.
+
+        Returns a dict with 'gestures' suitable for a touchscreen. Each
+        cell becomes a tappable region. Use this for the substrate IDE
+        on a tablet (paper 117, Open Q6).
+        """
+        gestures = []
+        for c in self._cells.values():
+            gestures.append({
+                "id": c.address,
+                "tap": {"action": "observe", "target": c.address},
+                "long_press": {"action": "witness", "target": c.address},
+                "swipe_right": {"action": "refresh", "target": c.address},
+            })
+        return {"gestures": gestures, "n": len(gestures)}
+
+    def _render_flowchart(self, **kwargs) -> str:
+        """Render the substrate as a Graphviz DOT graph.
+
+        The DOT format can be piped to `dot -Tpng` to produce an image.
+        Use this for documentation, for arch diagrams, for visual debugging.
+        """
+        lines = ["digraph substrate {", "  rankdir=LR;", "  node [shape=box];"]
+        for c in self._cells.values():
+            val = c.value
+            if isinstance(val, float):
+                val = f"{val:.2f}"
+            label = f"{c.address}\\n{val}"
+            lines.append(f'  "{c.address}" [label="{label}"];')
+        for c in self._cells.values():
+            for k, other in c.inputs.items():
+                lines.append(f'  "{other.address}" -> "{c.address}";')
+        lines.append("}")
+        return "\n".join(lines)
+
     def to_dict(self) -> Dict:
         return {
             "cells": [c.to_dict() for c in self._cells.values()],
             "n_cells": len(self._cells),
             "t": self._t,
         }
+
+    # -- Merkle tree of all witness roots (paper 117, Open Q4) --
+
+    def merkle_root(self) -> str:
+        """The Merkle root of all cells' witness roots.
+
+        For a substrate with N cells, this lets you prove a single cell's
+        witness log was not modified with O(log N) work, instead of O(N)
+        for the chain approach.
+
+        The tree is built by:
+        1. Collecting all (cell_address, witness_root) pairs
+        2. Hashing each pair to get the leaves
+        3. Pairwise combining until one root remains
+        """
+        if not self._cells:
+            return "0" * 16
+        # Step 1: collect leaves
+        leaves = sorted(
+            (_hash(f"{addr}:{c.witness_root}") for addr, c in self._cells.items())
+        )
+        # Step 2-3: pairwise hash until one root
+        while len(leaves) > 1:
+            new_level = []
+            for i in range(0, len(leaves) - 1, 2):
+                new_level.append(_hash(leaves[i] + leaves[i + 1]))
+            if len(leaves) % 2 == 1:
+                new_level.append(leaves[-1])  # odd one out
+            leaves = new_level
+        return leaves[0]
+
+    def merkle_proof(self, address: str) -> Optional[List[Tuple[str, str]]]:
+        """Return a Merkle proof that `address`'s witness log is in the tree.
+
+        Returns a list of (sibling_hash, position) tuples, where position is
+        'left' (sibling is on the left, target on the right) or 'right'.
+
+        None if the address doesn't exist.
+
+        Implementation: build the tree level by level. At each level, find
+        the target's index, get its sibling, and append to the proof. The
+        target's index becomes the parent's index in the next level.
+        """
+        if address not in self._cells:
+            return None
+        # Collect leaves: (hash, address) pairs, sorted
+        leaves = sorted(
+            (_hash(f"{addr}:{c.witness_root}"), addr) for addr, c in self._cells.items()
+        )
+        # Find target's index
+        idx = next((i for i, (_, a) in enumerate(leaves) if a == address), None)
+        if idx is None:
+            return None
+        proof = []
+        current = leaves
+        while len(current) > 1:
+            # Find sibling
+            if idx % 2 == 0:  # target is left
+                sibling_idx = idx + 1
+                if sibling_idx >= len(current):
+                    # Odd one out — duplicate self
+                    sibling_hash = current[idx][0]
+                    proof.append((sibling_hash, "right"))
+                else:
+                    proof.append((current[sibling_idx][0], "right"))
+            else:  # target is right
+                proof.append((current[idx - 1][0], "left"))
+            # Compute the new level and the target's index in it
+            new_level = []
+            for i in range(0, len(current) - 1, 2):
+                new_level.append((_hash(current[i][0] + current[i + 1][0]), current[i][1]))
+            if len(current) % 2 == 1:
+                new_level.append(current[-1])
+            # Target's index in new level is idx // 2
+            idx = idx // 2
+            current = new_level
+        return proof
 
     def save(self, path: str) -> None:
         with open(path, "w") as f:
