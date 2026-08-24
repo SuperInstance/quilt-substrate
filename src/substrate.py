@@ -639,6 +639,66 @@ class Substrate:
         """Return all agents that have witnessed anything."""
         return list(self._agent_witness.keys())
 
+    # -- Topology (paper 117, Open Q13) --
+
+    def betti_0(self) -> int:
+        """β₀: number of connected components in the cell graph."""
+        if not self._cells:
+            return 0
+        # Union-find
+        parent = {addr: addr for addr in self._cells}
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+        def union(x, y):
+            px, py = find(x), find(y)
+            if px != py:
+                parent[px] = py
+        # Union all connected cells
+        for addr, cell in self._cells.items():
+            for neighbor in cell.neighbors():
+                neighbor_addr = neighbor.address
+                if neighbor_addr in self._cells:
+                    union(addr, neighbor_addr)
+        return len(set(find(a) for a in self._cells))
+
+    def betti_1(self) -> int:
+        """β₁: number of independent cycles in the cell graph.
+
+        For an undirected graph: β₁ = E - V + β₀ (rank of H₁).
+
+        Returns:
+            β₁ as an integer. Can be negative if the graph is a forest.
+        """
+        V = len(self._cells)
+        if V == 0:
+            return 0
+        # Count edges (undirected, no duplicates)
+        edges = set()
+        for cell in self._cells.values():
+            for neighbor in cell.neighbors():
+                if neighbor.address in self._cells:
+                    edge = tuple(sorted([cell.address, neighbor.address]))
+                    edges.add(edge)
+        E = len(edges)
+        beta_0 = self.betti_0()
+        return E - V + beta_0
+
+    def edges(self) -> List[Tuple[str, str]]:
+        """List all undirected edges in the cell graph."""
+        seen = set()
+        out = []
+        for cell in self._cells.values():
+            for neighbor in cell.neighbors():
+                if neighbor.address in self._cells:
+                    edge = tuple(sorted([cell.address, neighbor.address]))
+                    if edge not in seen:
+                        seen.add(edge)
+                        out.append(edge)
+        return out
+
     # -- Opener layer (paper 111) --
 
     def render(self, opener: str, **kwargs) -> Any:
@@ -798,6 +858,9 @@ class Substrate:
             "cells": [c.to_dict() for c in self._cells.values()],
             "n_cells": len(self._cells),
             "t": self._t,
+            "beta_0": self.betti_0(),
+            "beta_1": self.betti_1(),
+            "n_edges": len(self.edges()),
         }
 
     # -- Merkle tree of all witness roots (paper 117, Open Q4) --
