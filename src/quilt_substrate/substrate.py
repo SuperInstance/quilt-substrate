@@ -956,6 +956,32 @@ class Substrate:
         else:
             return {"error": f"unknown opener: {opener}"}
 
+    def render_with_picker(self, primitive: str, role: str,
+                             picker=None, **kwargs) -> Any:
+        """Render the substrate using the learned opener picker.
+
+        If `picker` is given (an OpenerPicker instance), it picks the
+        best opener for (primitive, role) given observed success rates.
+        Otherwise, we just use the default opener from kwargs (or "chart").
+
+        After rendering, you can call `picker.observe(primitive, role, opener, success, quality)`
+        to feed the picker and let it learn.
+        """
+        opener = kwargs.pop("opener", None) or "chart"
+        picked_opener = opener
+        picker_reason = "default"
+        if picker is not None:
+            picked_opener, score, picker_reason = picker.pick(
+                primitive, role, candidates=[opener] if opener else None,
+            )
+        # Render
+        result = self.render(picked_opener, **kwargs)
+        return {
+            "result": result,
+            "picked_opener": picked_opener,
+            "picker_reason": picker_reason,
+        }
+
     def _render_chart(self, viewport: Optional[Dict] = None, **kwargs) -> Dict:
         """Render as a chart. Viewport is {axis: slice_spec}."""
         out = {"cells": []}
