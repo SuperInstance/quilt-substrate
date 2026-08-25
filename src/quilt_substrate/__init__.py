@@ -15,6 +15,7 @@ from .openers import (
     Opener, ChartOpener, VoiceOpener, GestureOpener, WitnessOpener,
     MIDIOpener, RESTOpener, MUDOpener, PLATOOpener,
     SlateOpener, HarborOpener, ReefOpener, DiveOpener, TideOpener,
+    BuoyOpener, TrawlOpener, ShoalOpener, MooringOpener, GaleOpener,
     register, get, all_openers,
 )
 from .jepa import (
@@ -26,6 +27,7 @@ __all__ = [
     "Opener", "ChartOpener", "VoiceOpener", "GestureOpener", "WitnessOpener",
     "MIDIOpener", "RESTOpener", "MUDOpener", "PLATOOpener",
     "SlateOpener", "HarborOpener", "ReefOpener", "DiveOpener", "TideOpener",
+    "BuoyOpener", "TrawlOpener", "ShoalOpener", "MooringOpener", "GaleOpener",
     "register", "get", "all_openers",
     "LinearJEPA", "MLPJEPA", "KnnJEPA", "auto_train_jepa",
     "_hash", "_now", "_now_ts",

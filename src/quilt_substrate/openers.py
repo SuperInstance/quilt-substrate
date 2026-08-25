@@ -660,3 +660,396 @@ register("harbor", HarborOpener())
 register("reef", ReefOpener())
 register("dive", DiveOpener())
 register("tide", TideOpener())
+
+
+# -- 5 MORE new openers: BUOY, TRAWL, SHOAL, MOORING, GALE ------------------
+
+class BuoyOpener(Opener):
+    """Renders the substrate as a channel of channel-marker buoys.
+
+    A buoy is a floating marker that says "you can sail here safely".
+    This opener flags every cell whose confidence is above a navigable
+    threshold (default 0.8) as a green buoy; cells below are red buoys
+    or uncharted water. The opener yields one event per cell plus a
+    header and a summary — a chart you can sail by.
+
+    Fable 11 (Paper and the Tablet): the buoy is a marker of trust. It
+    does not change the substrate; it just *declares* which cells you
+    can rely on. Like a paper map's legend, the buoy separates the
+    chart from the chart's claim about itself.
+    """
+
+    def __init__(self, threshold: float = 0.8):
+        self.threshold = threshold
+
+    def activate(self, target) -> Iterator[Dict[str, Any]]:
+        from .substrate import Substrate
+        if isinstance(target, Substrate):
+            cells = target.all_cells()
+        else:
+            cells = [target]
+        if not cells:
+            yield {"kind": "buoy_header", "threshold": self.threshold, "navigable": 0, "total": 0}
+            yield {"kind": "buoy_empty", "text": "No buoys. The channel is empty."}
+            return
+        navigable = 0
+        for cell in cells:
+            conf = cell.confidence
+            is_navigable = conf >= self.threshold
+            if is_navigable:
+                navigable += 1
+                color = "green"
+                glyph = "○"  # green buoy
+            else:
+                color = "red"
+                glyph = "●"  # red buoy
+            yield {
+                "kind": "buoy",
+                "address": cell.address,
+                "confidence": round(conf, 4),
+                "navigable": is_navigable,
+                "color": color,
+                "glyph": glyph,
+                "line": f"{cell.address:>6}  {glyph}  conf={conf:.2f}  "
+                        f"{'NAVIGABLE' if is_navigable else 'uncharted'}",
+            }
+        yield {
+            "kind": "buoy_header",
+            "threshold": self.threshold,
+            "navigable": navigable,
+            "total": len(cells),
+            "summary": f"{navigable}/{len(cells)} cells navigable at conf ≥ {self.threshold}",
+        }
+
+    def preview(self, target) -> str:
+        return f"A channel of buoys. Cells with confidence ≥ {self.threshold} are green (navigable); below are red (uncharted)."
+
+
+class TrawlOpener(Opener):
+    """Renders the substrate as the catch of a fishing trawl.
+
+    A trawl net drags through the substrate and collects only the cells
+    whose numeric value falls within a given range — like a net with a
+    mesh size. The opener yields each "caught" cell as a fish in the
+    net, plus a header with the haul count and a "bycatch" event for
+    cells that escaped the net.
+
+    Fable 21 (Compass and the Graph): the trawl is a filter that takes
+    the substrate's full body and returns only what fits the mesh. The
+    metaphor is the same as `filter` in any programming language — but
+    cast as fishing, because the substrate is a sea.
+    """
+
+    def __init__(self, lo: float = 0.0, hi: float = 1.0):
+        if hi < lo:
+            lo, hi = hi, lo
+        self.lo = lo
+        self.hi = hi
+
+    def _is_in_range(self, v: Any) -> bool:
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return self.lo <= float(v) <= self.hi
+        return False
+
+    def activate(self, target) -> Iterator[Dict[str, Any]]:
+        from .substrate import Substrate
+        if isinstance(target, Substrate):
+            cells = target.all_cells()
+        else:
+            cells = [target]
+        yield {
+            "kind": "trawl_header",
+            "lo": self.lo,
+            "hi": self.hi,
+            "total_cells": len(cells),
+        }
+        if not cells:
+            yield {"kind": "trawl_empty", "text": "The sea is empty. The trawl returns nothing."}
+            return
+        caught = 0
+        for cell in cells:
+            v = cell.value
+            in_net = self._is_in_range(v)
+            if in_net:
+                caught += 1
+                yield {
+                    "kind": "trawl_catch",
+                    "address": cell.address,
+                    "value": v,
+                    "lo": self.lo,
+                    "hi": self.hi,
+                    "glyph": "<><",
+                    "line": f"<><  {cell.address:>6}  v={v}  (kept)",
+                }
+            else:
+                yield {
+                    "kind": "trawl_bycatch",
+                    "address": cell.address,
+                    "value": v,
+                    "lo": self.lo,
+                    "hi": self.hi,
+                    "glyph": "~~",
+                    "line": f"~~   {cell.address:>6}  v={v}  (escaped)",
+                }
+        yield {
+            "kind": "trawl_summary",
+            "caught": caught,
+            "escaped": len(cells) - caught,
+            "total": len(cells),
+        }
+
+    def preview(self, target) -> str:
+        return f"A fishing trawl with mesh [{self.lo}, {self.hi}]. Cells with values inside the range are caught; others escape."
+
+
+class ShoalOpener(Opener):
+    """Renders the substrate as a sea floor, looking for shoals.
+
+    A shoal is a place where the depth changes suddenly — a sandbar
+    rising from the sea floor. This opener sorts cells by address
+    (treated as a position along a transect) and yields a "depth event"
+    for each cell. A shoal is flagged wherever the depth change between
+    consecutive cells exceeds a threshold (a sudden rise or fall).
+
+    Fable 19 (Oracle): the oracle predicts depths. The shoal is a
+    *discontinuity* — a place where the oracle's prediction breaks.
+    Like a sandbar visible only at low tide, a shoal is hidden until
+    you traverse the chart and notice the gradient.
+    """
+
+    def __init__(self, threshold: float = 0.5):
+        # Minimum |delta| in value to count as a shoal.
+        self.threshold = threshold
+
+    def activate(self, target) -> Iterator[Dict[str, Any]]:
+        from .substrate import Substrate
+        if isinstance(target, Substrate):
+            cells = sorted(target.all_cells(), key=lambda c: c.address)
+        else:
+            cells = [target]
+        yield {
+            "kind": "shoal_header",
+            "threshold": self.threshold,
+            "n_cells": len(cells),
+        }
+        if not cells:
+            yield {"kind": "shoal_empty", "text": "Empty sea. No floor to chart."}
+            return
+
+        # Build a (address, numeric_value_or_none) sequence
+        seq = []
+        for c in cells:
+            v = c.value
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                seq.append((c.address, float(v)))
+            else:
+                seq.append((c.address, None))
+
+        # Yield a depth event for every cell so the chart is complete
+        prev_val = None
+        for addr, v in seq:
+            if v is None:
+                yield {
+                    "kind": "shoal_depth",
+                    "address": addr,
+                    "depth": None,
+                    "note": "non-numeric — no depth reading",
+                }
+                continue
+            delta = None if prev_val is None else (v - prev_val)
+            yield {
+                "kind": "shoal_depth",
+                "address": addr,
+                "depth": v,
+                "delta_from_prev": delta,
+            }
+            if delta is not None and abs(delta) >= self.threshold:
+                # Shoal! Mark a discontinuity
+                kind = "shoal_rise" if delta > 0 else "shoal_drop"
+                glyph = "/\\" if delta > 0 else "\\/"
+                yield {
+                    "kind": kind,
+                    "address": addr,
+                    "delta": round(delta, 4),
+                    "threshold": self.threshold,
+                    "glyph": glyph,
+                    "warning": f"SHOAL at {addr}: depth change {delta:+.2f} "
+                               f"(≥ {self.threshold})",
+                }
+            prev_val = v
+
+    def preview(self, target) -> str:
+        return f"A sea-floor transect. Each cell is a depth reading. Sudden changes (|Δ| ≥ {self.threshold}) are flagged as shoals."
+
+
+class MooringOpener(Opener):
+    """Renders the substrate as a harbor, mooring by mooring.
+
+    A mooring is a place where many boats are tied up — a hub of
+    activity. This opener finds the cells that have the most
+    connections (in-edges plus out-edges), ranks them by degree, and
+    yields each as a "mooring" event. The busier the cell, the busier
+    the harbor.
+
+    Fable 11 (Paper and the Tablet): the mooring is a record of who
+    came and went. A cell with many neighbors is a place of importance
+    — the substrate's "downtown". A cell with no neighbors is a
+    desert island; one with many is a port city.
+    """
+
+    def __init__(self, top: int = 5):
+        # How many of the busiest moorings to yield as full events.
+        self.top = top
+
+    def activate(self, target) -> Iterator[Dict[str, Any]]:
+        from .substrate import Substrate
+        if not isinstance(target, Substrate):
+            yield {
+                "kind": "mooring",
+                "address": target.address,
+                "degree": len(target.neighbors()),
+                "rank": 0,
+                "note": "Single cell — degree is just its neighbor count.",
+            }
+            return
+        cells = target.all_cells()
+        # Compute degree for every cell
+        degrees = []
+        seen_edges = set()
+        for cell in cells:
+            # Use the cell's inputs + outputs as its neighbors
+            deg = len(cell.neighbors())
+            degrees.append((cell.address, cell, deg))
+        # Sort descending by degree
+        degrees.sort(key=lambda x: (-x[2], x[0]))
+        yield {
+            "kind": "mooring_header",
+            "n_cells": len(cells),
+            "n_edges": len(target.edges()),
+            "top": self.top,
+        }
+        if not cells:
+            yield {"kind": "mooring_empty", "text": "No moorings. The harbor is deserted."}
+            return
+        for i, (addr, cell, deg) in enumerate(degrees[: self.top]):
+            busyness = (
+                "ghost port" if deg == 0 else
+                "quiet cove" if deg <= 1 else
+                "fishing village" if deg <= 3 else
+                "busy port" if deg <= 6 else
+                "metropolis"
+            )
+            yield {
+                "kind": "mooring",
+                "address": addr,
+                "degree": deg,
+                "rank": i,
+                "busyness": busyness,
+                "neighbors": [n.address for n in cell.neighbors()],
+                "value": cell.value,
+                "confidence": round(cell.confidence, 4),
+                "line": f"#{i+1}  {addr:>6}  degree={deg:>2}  ({busyness})",
+            }
+
+    def preview(self, target) -> str:
+        return f"A harbor ranked by mooring. The {self.top} busiest cells (most connections) are listed, with a 'busyness' label."
+
+
+class GaleOpener(Opener):
+    """Renders the substrate as a weather forecast for a coming gale.
+
+    A gale is a storm — and a stale inference is a storm about to
+    break. This opener inspects each cell's *inference confidence*
+    (not the canonical confidence) and flags those whose inference is
+    decaying rapidly, or is already below a danger threshold. Each
+    flagged cell becomes a "gale warning" event.
+
+    Fable 19 (Oracle) + Fable 22 (Sundial): the oracle's confidence
+    meets the sundial — prophecies that were once bright are now
+    dimming. The gale opener is the early-warning system for prophecies
+    that have grown too stale to trust. Used by agents that depend on
+    inferences (paper 107, paper 117 Open Q5) to decide when to refresh.
+    """
+
+    def __init__(self, danger: float = 0.3):
+        # Inference confidence below this is a gale.
+        self.danger = danger
+
+    def activate(self, target) -> Iterator[Dict[str, Any]]:
+        from .substrate import Substrate
+        if isinstance(target, Substrate):
+            cells = target.all_cells()
+        else:
+            cells = [target]
+        yield {
+            "kind": "gale_header",
+            "danger_threshold": self.danger,
+            "n_cells": len(cells),
+        }
+        if not cells:
+            yield {"kind": "gale_empty", "text": "Calm seas. The forecast is empty."}
+            return
+        gale_count = 0
+        for cell in cells:
+            inf = cell.inference
+            # No inference set? Skip — nothing to warn about.
+            if inf is None:
+                yield {
+                    "kind": "gale_clear",
+                    "address": cell.address,
+                    "inference": None,
+                    "note": "no inference set — no gale possible",
+                }
+                continue
+            inf_conf = cell.inference_confidence
+            canonical_conf = cell.confidence
+            is_gale = inf_conf < self.danger
+            if is_gale:
+                gale_count += 1
+                # Storm level based on how far below danger
+                if inf_conf < self.danger * 0.3:
+                    storm = "hurricane"
+                    glyph = "X"
+                elif inf_conf < self.danger * 0.6:
+                    storm = "gale"
+                    glyph = "!"
+                else:
+                    storm = "squall"
+                    glyph = "?"
+                yield {
+                    "kind": "gale_warning",
+                    "address": cell.address,
+                    "inference": inf,
+                    "inference_confidence": round(inf_conf, 4),
+                    "canonical_confidence": round(canonical_conf, 4),
+                    "storm": storm,
+                    "glyph": glyph,
+                    "warning": f"GALE at {cell.address}: inference confidence {inf_conf:.2f} "
+                               f"below danger ({self.danger})",
+                }
+            else:
+                yield {
+                    "kind": "gale_clear",
+                    "address": cell.address,
+                    "inference": inf,
+                    "inference_confidence": round(inf_conf, 4),
+                    "canonical_confidence": round(canonical_conf, 4),
+                    "note": "inference is fresh — no gale",
+                }
+        yield {
+            "kind": "gale_summary",
+            "gale_count": gale_count,
+            "total": len(cells),
+            "danger_threshold": self.danger,
+        }
+
+    def preview(self, target) -> str:
+        return f"A weather forecast. Cells whose inference confidence has decayed below {self.danger} are flagged as gales."
+
+
+# Register the 5 MORE new openers
+register("buoy", BuoyOpener())
+register("trawl", TrawlOpener())
+register("shoal", ShoalOpener())
+register("mooring", MooringOpener())
+register("gale", GaleOpener())
