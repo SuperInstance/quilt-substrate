@@ -371,6 +371,14 @@ def main():
     p_run.add_argument("--state-dir", default="/workspace/cowboy-state",
                           help="Where to store cowboy memory")
 
+    p_watch = sub.add_parser("watch", help="Watch the bus in real time (replay mode: --bus-log)")
+    p_watch.add_argument("--state-dir", default="/workspace/cowboy-state",
+                            help="Where to store cowboy memory")
+    p_watch.add_argument("--bus-log", default=None,
+                            help="Optional path to bus.jsonl to replay (for testing)")
+    p_watch.add_argument("--retire-after", type=int, default=3,
+                            help="Auto-retire after N consecutive failures")
+
     p_report = sub.add_parser("report", help="Print the last morning report")
     p_report.add_argument("--state-dir", default="/workspace/cowboy-state")
 
@@ -397,6 +405,49 @@ def main():
     if args.cmd == "run":
         report = cowboy.run_morning()
         print(report.to_markdown())
+    elif args.cmd == "watch":
+        from quilt_substrate.bus import EventBus, BusLogger
+        from quilt_substrate.cowboy_reactor import CowboyReactor
+        bus = EventBus()
+        reactor = CowboyReactor(cowboy, bus, retire_after_failures=args.retire_after)
+        bus.subscribe("cast.observed", BusLogger(stdout=True))
+        if args.bus_log:
+            # Replay mode: load events from JSONL and republish
+            print(f"Replaying {args.bus_log}...")
+            import json
+            n = 0
+            with open(args.bus_log) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    d = json.loads(line)
+                    e = type("E", (), d)()
+                    e.data = d.get("data", {})
+                    e.topic = d.get("topic", "")
+                    e.source = d.get("source", "")
+                    e.ts = d.get("ts", 0)
+                    # Manually call subscribers
+                    for fn in bus.subscribers.get(e.topic, []):
+                        try:
+                            fn(e)
+                        except Exception:
+                            pass
+                    n += 1
+            print(f"\nReplayed {n} events.")
+            print(f"Auto-retired: {reactor.stats()['auto_retired']}")
+            print(f"Recent sizes: {reactor.stats()['recent_sizes']}")
+        else:
+            # Live mode: wait for events
+            print("Watching bus. Press Ctrl+C to stop.")
+            try:
+                import time
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                print("\nStopped watching.")
+            finally:
+                reactor.stop()
     elif args.cmd == "report":
         last = cowboy.memory.last_morning()
         if last is None:
