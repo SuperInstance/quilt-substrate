@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320" width="640" height="320">
+  <defs>
+    <linearGradient id="forest" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0A1A14"/>
+      <stop offset="100%" stop-color="#1A2E1A"/>
+    </linearGradient>
+    <radialGradient id="fireplace" cx="50%" cy="80%" r="40%">
+      <stop offset="0%" stop-color="#FFE5A0" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#0A1A14" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="cellg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10B981"/>
+      <stop offset="100%" stop-color="#064E3B"/>
+    </linearGradient>
+    <linearGradient id="linkg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#1E40AF"/>
+    </linearGradient>
+    <filter id="glow5">
+      <feGaussianBlur stdDeviation="2.5" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="640" height="320" fill="url(#forest)"/>
+  <!-- stars / canopy -->
+  <g fill="#FFF" opacity="0.5">
+    <circle cx="40" cy="30" r="0.7"/>
+    <circle cx="280" cy="20" r="0.6"/>
+    <circle cx="580" cy="25" r="0.8"/>
+    <circle cx="610" cy="80" r="0.6"/>
+    <circle cx="80" cy="60" r="0.5"/>
+  </g>
+  <!-- the fire at the bottom of the campfire -->
+  <g filter="url(#glow5)">
+    <ellipse cx="320" cy="290" rx="240" ry="40" fill="url(#fireplace)"/>
+  </g>
+  <g>
+    <ellipse cx="320" cy="295" rx="14" ry="20" fill="#FFE5A0" opacity="0.9"/>
+    <ellipse cx="320" cy="288" rx="9"  ry="14" fill="#FF9A3C" opacity="0.9"/>
+    <ellipse cx="320" cy="284" rx="5"  ry="9"  fill="#FF6B1A"/>
+  </g>
+  <!-- the cell-graph (a small forest of dots and arrows) -->
+  <g filter="url(#glow5)">
+    <circle cx="180" cy="110" r="9" fill="url(#cellg)"/>
+    <circle cx="260" cy="80"  r="9" fill="url(#cellg)"/>
+    <circle cx="320" cy="120" r="11" fill="url(#cellg)"/>
+    <circle cx="380" cy="80"  r="9" fill="url(#cellg)"/>
+    <circle cx="460" cy="110" r="9" fill="url(#cellg)"/>
+    <circle cx="220" cy="170" r="9" fill="url(#cellg)"/>
+    <circle cx="320" cy="180" r="10" fill="url(#cellg)"/>
+    <circle cx="420" cy="170" r="9" fill="url(#cellg)"/>
+  </g>
+  <g stroke="url(#linkg)" stroke-width="1.4" fill="none" opacity="0.7">
+    <line x1="180" y1="110" x2="260" y2="80"/>
+    <line x1="260" y1="80"  x2="320" y2="120"/>
+    <line x1="320" y1="120" x2="380" y2="80"/>
+    <line x1="380" y1="80"  x2="460" y2="110"/>
+    <line x1="180" y1="110" x2="220" y2="170"/>
+    <line x1="220" y1="170" x2="320" y2="180"/>
+    <line x1="320" y1="180" x2="420" y2="170"/>
+    <line x1="420" y1="170" x2="460" y2="110"/>
+    <line x1="320" y1="120" x2="320" y2="180"/>
+  </g>
+  <!-- 4 properties as labels around the cell-graph -->
+  <g font-family="ui-sans-serif,system-ui" font-size="10" fill="#FFE5A0">
+    <text x="100" y="40"  font-weight="bold">tensor</text>
+    <text x="100" y="54"  font-size="8" fill="#D1FAE5" font-style="italic">slice on any axis</text>
+    <text x="380" y="40"  font-weight="bold">schrödinger</text>
+    <text x="380" y="54"  font-size="8" fill="#D1FAE5" font-style="italic">observe to collapse</text>
+    <text x="100" y="220" font-weight="bold">fog-of-war decay</text>
+    <text x="100" y="234" font-size="8" fill="#D1FAE5" font-style="italic">c(t) = c₀ e^(-λt)</text>
+    <text x="380" y="220" font-weight="bold">8 openers</text>
+    <text x="380" y="234" font-size="8" fill="#D1FAE5" font-style="italic">one substrate, many views</text>
+  </g>
+  <!-- center label -->
+  <text x="320" y="125" text-anchor="middle" fill="#0A0A14" font-family="ui-sans-serif,system-ui" font-size="9" font-weight="bold">SUBSTRATE</text>
+  <!-- 11 primitives in a ring around the fire -->
+  <g font-family="ui-monospace,monospace" font-size="9" fill="#FFE5A0" text-anchor="middle">
+    <text x="80"  y="160">Z_in</text>
+    <text x="80"  y="175">Z_out</text>
+    <text x="60"  y="200">JEPA</text>
+    <text x="80"  y="230">DoubleEntry</text>
+    <text x="80"  y="245">Vibe</text>
+    <text x="80"  y="260">GC</text>
+    <text x="80"  y="275">Murmur</text>
+    <text x="80"  y="290">Graph</text>
+    <text x="560" y="160">Convoy</text>
+    <text x="560" y="180">Decay</text>
+    <text x="560" y="200">Witness</text>
+  </g>
+  <!-- 11 prims on left/right + 3 new bold -->
+  <text x="320" y="305" text-anchor="middle" fill="#FFE5A0" font-family="ui-sans-serif,system-ui" font-size="12" font-weight="600" letter-spacing="0.05em">11 PRIMITIVES · 4 PROPERTIES · 8 OPENERS · 405 TESTS</text>
+</svg>
