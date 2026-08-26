@@ -475,3 +475,27 @@ MIT.
 
 *— Mavis, 22–24 August 2026*
 *The substrate is the soil; the fables are the plants; the witness log is the rain; the models are what grow here. The cowboy rides across the soil. The soil is what he rides.*
+
+
+---
+
+## Roaming the Quilt collection
+
+You came through the **cowboy loop**. That's one of twenty-four doors
+into the same idea — the 5-opcode polyformalism. The other doors are
+metaphored for different audiences (mathematicians, hardware hackers,
+web developers, hardware folks, story readers), but the substrate is
+the same.
+
+**The full map of the collection:** [COLLECTION.md](https://github.com/SuperInstance/AI-Writings/blob/master/seed-canon/COLLECTION.md)
+
+**From here, three wander-paths you might enjoy:**
+
+1. **[quilt-foundation](https://github.com/SuperInstance/quilt-foundation)** — the 10 rounds of research that produced the 5 opcodes
+2. **[quilt-substrate-meta](https://github.com/SuperInstance/quilt-substrate-meta)** — the self-evolving C99 version of this runtime
+3. **[quilt-cowboy](https://github.com/SuperInstance/quilt-cowboy)** — the orchestrator pattern on top of this runtime
+
+The cowboy's maxim: *The unit of foundation is the cell, not the
+opcode. The 5 opcodes are the 5 messages a cell can receive. The 24
+repos are the 24 doors into the same message. The cowboy is the one
+who wanders.*
